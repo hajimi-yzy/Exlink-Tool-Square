@@ -1,0 +1,15 @@
+[
+{"path":"screen","type":"object","x":0,"y":0,"w":480,"h":480,"hidden":false,"font_height":22},
+{"path":"screen/0","type":"object","x":47,"y":410,"w":75,"h":70,"hidden":false,"font_height":22},
+{"path":"screen/0/0","type":"label","x":82,"y":432,"w":4,"h":15,"hidden":false,"font_height":15},
+{"path":"screen/0/1","type":"label","x":65,"y":444,"w":38,"h":18,"hidden":false,"font_height":18},
+{"path":"screen/1","type":"object","x":122,"y":410,"w":75,"h":70,"hidden":false,"font_height":22},
+{"path":"screen/1/0","type":"label","x":156,"y":432,"w":7,"h":15,"hidden":false,"font_height":15},
+{"path":"screen/1/1","type":"label","x":150,"y":444,"w":18,"h":18,"hidden":false,"font_height":18},
+{"path":"screen/2","type":"label","x":308,"y":420,"w":61,"h":22,"hidden":false,"font_height":22},
+{"path":"screen/3","type":"label","x":61,"y":52,"w":235,"h":27,"hidden":false,"font_height":27},
+{"path":"screen/4","type":"label","x":83,"y":200,"w":28,"h":46,"hidden":false,"font_height":46},
+{"path":"screen/5","type":"label","x":392,"y":220,"w":38,"h":30,"hidden":false,"font_height":30},
+{"path":"screen/6","type":"button","x":188,"y":320,"w":135,"h":60,"hidden":false,"font_height":22},
+{"path":"screen/6/0","type":"label","x":230,"y":341,"w":51,"h":18,"hidden":false,"font_height":18}
+]

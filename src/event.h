@@ -1,0 +1,107 @@
+
+#define SWIPE_THRESHOLD 30 // 最小滑动距离阈值
+
+extern int mcp4107_flag;
+extern int pwm_flag;
+extern int i2cscan_flag;
+extern int spi_bridge_flag;
+extern int uart_helper_flag;
+extern int BluetoothSerial_flag;
+extern int FREcount_flag;
+
+extern lv_obj_t *btn1;
+extern lv_obj_t *btn2;
+extern lv_obj_t *btn3;
+extern lv_obj_t *btn4;
+extern lv_obj_t *btn5;
+extern lv_obj_t *btn6;
+extern lv_obj_t *btn7;
+extern lv_obj_t *btn8;
+extern lv_obj_t *btn9;
+extern lv_obj_t *btn10;
+extern lv_obj_t *btn11;
+extern lv_obj_t *btn_level;
+extern lv_obj_t *btn_environment;
+extern lv_obj_t *btn12;
+extern lv_obj_t *btn13;
+extern lv_obj_t *btn14;
+
+void ui_event_Screen1(lv_event_t *e);
+extern lv_obj_t *ui_Screen1;
+extern lv_obj_t *ui_Label1;
+void ui_event_Image1(lv_event_t *e);
+extern lv_obj_t *ui_Image1;
+void ui_event_Screen2(lv_event_t *e);
+extern lv_obj_t *ui_Screen2;
+void ui_event_Image2(lv_event_t *e);
+extern lv_obj_t *ui_Image2;
+void anim_cb1(void *obj, int32_t v);
+void anim_cb2(void *obj, int32_t v);
+void anim_end_callback(lv_anim_t *animation);
+
+void btn1_event_cb(lv_event_t *e);
+void btn2_event_cb(lv_event_t *e);
+void btn3_event_cb(lv_event_t *e);
+void btn4_event_cb(lv_event_t *e);
+void btn5_event_cb(lv_event_t *e);
+void btn6_event_cb(lv_event_t *e);
+void btn7_event_cb(lv_event_t *e);
+void btn8_event_cb(lv_event_t *e);
+void btn9_event_cb(lv_event_t *e);
+void btn10_event_cb(lv_event_t *e);
+void btn11_event_cb(lv_event_t *e);
+void btn_level_event_cb(lv_event_t *e);
+void btn_environment_event_cb(lv_event_t *e);
+void btn12_event_cb(lv_event_t *e);
+void btn13_event_cb(lv_event_t *e);
+void btn14_event_cb(lv_event_t *e);
+
+void i2conbtn_event_cb(lv_event_t *e);
+void spiconbtn_event_cb(lv_event_t *e);
+
+void poweronbtn_event_cb(lv_event_t *e);
+void pwm_btn_event_cb(lv_event_t *e);
+void wireless_uart_btn_event_cb(lv_event_t *e);
+
+void VUPbtn_event_cb(lv_event_t *e);
+void VDOWNbtn_event_cb(lv_event_t *e);
+void V11btn_event_cb(lv_event_t *e);
+void V5btn_event_cb(lv_event_t *e);
+void V3btn_event_cb(lv_event_t *e);
+void save_11v_preset_event_cb(lv_event_t *e);
+void save_5v_preset_event_cb(lv_event_t *e);
+void save_3v3_preset_event_cb(lv_event_t *e);
+void save_default_preset_event_cb(lv_event_t *e);
+void buzzer_apply_event_cb(lv_event_t *e);
+void settings_open_event_cb(lv_event_t *e);
+void log_enabled_event_cb(lv_event_t *e);
+void log_channel_event_cb(lv_event_t *e);
+void log_level_event_cb(lv_event_t *e);
+void ble_usb_passthrough_event_cb(lv_event_t *e);
+void uart_btn_event_cb(lv_event_t *e);
+void event_handler_back(lv_event_t *e);
+void longpress_event_handler_back(lv_event_t *e);
+void main_menu_longpress_event_handler(lv_event_t *e);
+
+void keyboard_event_handler(lv_event_t *e);
+void fretext_event_handler(lv_event_t *e);
+void dutytext_event_handler(lv_event_t *e);
+void buzzertext_event_handler(lv_event_t *e);
+void power_value_text_event_handler(lv_event_t *e);
+void servo_angle_event_cb(lv_event_t *e);
+void servo_slider_event_cb(lv_event_t *e);
+void servo_minus_event_cb(lv_event_t *e);
+void servo_plus_event_cb(lv_event_t *e);
+void servo_preset_0_event_cb(lv_event_t *e);
+void servo_preset_center_event_cb(lv_event_t *e);
+void servo_preset_180_event_cb(lv_event_t *e);
+void clear_keyboard_event_handler(lv_event_t *e);
+
+void slider_event_cb(lv_event_t *e);
+
+extern lv_timer_t *updatelabel_timer1;
+extern lv_timer_t *updatelabel_timer2;
+extern lv_timer_t *adddata_timer;
+extern lv_timer_t *slider_update_timer;
+
+extern lv_obj_t *panel;

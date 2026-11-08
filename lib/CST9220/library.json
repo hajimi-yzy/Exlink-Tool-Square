@@ -1,0 +1,7 @@
+{
+  "name": "CST9220",
+  "version": "1.0.0",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "headers": "CST9220.h"
+}

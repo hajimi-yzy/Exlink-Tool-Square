@@ -1,0 +1,4 @@
+# Copy to cloud.local.properties, fill locally, and never publish that file.
+# Leave BOTH values empty for an App with only local BLE/device/asset functions.
+EXLINK_API_BASE_URL=
+EXLINK_TLS_FINGERPRINT_SHA256=
