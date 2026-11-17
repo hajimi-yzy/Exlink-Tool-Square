@@ -48,6 +48,7 @@ bool CST9220::begin(uint32_t frequency)
   _releaseReported = false;
   _communicationOk = true;
 
+  pinMode(_interrupt, INPUT); // configure once; runtime recovery must keep ISR ownership
   resetController();
   _wire.begin(_sda, _scl, _frequency);
   _ready = probe();
@@ -59,7 +60,6 @@ void CST9220::resetController()
 {
 
   pinMode(_rst, OUTPUT);
-  pinMode(_interrupt, INPUT); // the PCB has the required external pull-up
 
   // CST92xx reset: high -> low -> high.  Keep the post-reset delay long
   // enough for the controller to leave its bootloader before I2C probing.

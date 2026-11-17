@@ -6,6 +6,7 @@ class TwoWire {
  public:
   uint16_t timeout = 0;
   bool fail_mpu = false, fail_aht = false, corrupt_aht_crc = false;
+  bool fail_ina = false;
   uint8_t wiper = 50;
   std::array<uint8_t, 256> mpu{};
   std::vector<host::BusEvent> events;

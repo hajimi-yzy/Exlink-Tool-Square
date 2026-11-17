@@ -32,6 +32,7 @@ struct TouchSample {
   bool down = false;
   bool released = false;
   bool cancelled = false; // Missing reports end a contact without a click.
+  bool irq = false; // A new hardware IRQ preceded this read, not a timer poll.
   uint16_t x = 0;
   uint16_t y = 0;
   uint32_t sampled_ms = 0;
@@ -45,6 +46,8 @@ struct IoDiagnostics {
   uint32_t last_touch_ms = 0;
   uint32_t max_transaction_ms = 0;
   bool touch_ready = false;
+  bool ina_ready = false;
+  uint8_t ina_device = UINT8_MAX;
 };
 
 // After begin(), the worker exclusively owns the internal Wire bus and its
@@ -75,6 +78,10 @@ class InternalI2cService {
   // or OTA. Never suspend the worker while it might hold a driver lock.
   bool pause(bool powerDownIna, uint32_t timeout_ms = 1800);
   void resume();
+  // GPIO light-sleep wake changes the interrupt type on the touch IRQ pin.
+  // Disable the app ISR throughout the sleep loop, then restore its edge.
+  bool suspendTouchInterruptForSleep();
+  void restoreTouchInterruptAfterSleep();
 
  private:
   struct Request {
@@ -112,6 +119,7 @@ class InternalI2cService {
   void publishLevel(const LevelSample &sample, const Control &state);
   void publishEnvironment(const Aht20Sample &sample, const Control &state);
   void serviceSensors(const Control &state);
+  bool serviceInaRecovery(bool contact_active);
   // Stops at most one sensor per call. True means a stop step was performed;
   // pause acknowledgement must wait for a later call returning false.
   bool quiesceSensors();
@@ -145,6 +153,9 @@ class InternalI2cService {
   bool level_worker_enabled_ = false, environment_worker_enabled_ = false;
   uint32_t level_worker_generation_ = 0, environment_worker_generation_ = 0;
   bool environment_turn_ = false;
+  uint32_t ina_retry_at_ms_ = 0;
+  uint8_t ina_probe_address_ = 0x40, ina_setup_step_ = 0;
+  uint8_t ina_candidate_ = UINT8_MAX;
   unsigned outstanding_requests_ = 0;
   IoDiagnostics diagnostics_;
 };

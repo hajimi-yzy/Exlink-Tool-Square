@@ -17,6 +17,9 @@ struct BusEvent {
 };
 struct Runtime {
   uint32_t now = 0, deadline = 0, notifications = 0;
+  bool irq_low = true, irq_enabled = false;
+  int irq_type = 2;
+  unsigned irq_disables = 0, irq_enables = 0;
   void (*entry)(void *) = nullptr;
   void *context = nullptr;
   std::function<void()> tick_hook;

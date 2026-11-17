@@ -1,4 +1,8 @@
 #include "internal_i2c_service.h"
+#include "touch_read_schedule.h"
+
+#include <string.h>
+#include <driver/gpio.h>
 
 namespace exlink {
 
@@ -15,6 +19,9 @@ bool InternalI2cService::begin(bool touchEnabled, uint8_t inaDevice) {
   irq_pin_ = touchEnabled ? touch_.interruptPin() : -1;
   diagnostics_ = IoDiagnostics{};
   diagnostics_.touch_ready = touchEnabled && touch_.isReady();
+  diagnostics_.ina_ready = inaDevice != UINT8_MAX;
+  diagnostics_.ina_device = inaDevice;
+  ina_retry_at_ms_ = millis() + 5000U;
   pause_requested_ = pause_power_down_ = pause_acknowledged_ = false;
   outstanding_requests_ = 0;
   generation_ = 0;
@@ -220,6 +227,18 @@ void InternalI2cService::resume() {
   if (task_) xTaskNotify(task_, NotifyControl, eSetBits);
 }
 
+bool InternalI2cService::suspendTouchInterruptForSleep() {
+  return started_ && touch_enabled_ && irq_pin_ >= 0 &&
+      gpio_intr_disable(static_cast<gpio_num_t>(irq_pin_)) == ESP_OK;
+}
+
+void InternalI2cService::restoreTouchInterruptAfterSleep() {
+  if (!started_ || !touch_enabled_ || irq_pin_ < 0) return;
+  const gpio_num_t pin = static_cast<gpio_num_t>(irq_pin_);
+  if (gpio_set_intr_type(pin, GPIO_INTR_NEGEDGE) == ESP_OK)
+    (void)gpio_intr_enable(pin);
+}
+
 void InternalI2cService::taskEntry(void *context) {
   static_cast<InternalI2cService *>(context)->run();
 }
@@ -261,8 +280,11 @@ void InternalI2cService::finishRequest(const Request &request, bool cancelled) {
           result.cancelled = true;
         } else {
           result.millivolts = ina_.getBusMilliVolts(ina_device_);
+          if (!ina_.lastReadOk()) { result.cancelled = true; break; }
           result.microamps = static_cast<uint64_t>(ina_.getBusMicroAmps(ina_device_));
+          if (!ina_.lastReadOk()) { result.cancelled = true; break; }
           result.microwatts = static_cast<uint64_t>(ina_.getBusMicroWatts(ina_device_));
+          if (!ina_.lastReadOk()) result.cancelled = true;
         }
         break;
     }
@@ -364,11 +386,94 @@ void InternalI2cService::serviceSensors(const Control &state) {
   recordDuration(started);
 }
 
+bool InternalI2cService::serviceInaRecovery(bool contact_active) {
+  const uint32_t now = millis();
+  if (ina_device_ != UINT8_MAX || contact_active ||
+      int32_t(now - ina_retry_at_ms_) < 0) return false;
+  const uint32_t started = now;
+  if (ina_setup_step_ == 0) {
+    // Probe one candidate per worker turn. Only a real INA226 die ID permits
+    // the library's one-time enumeration; a missing bus never triggers it.
+    wire_.beginTransmission(ina_probe_address_);
+    wire_.write(uint8_t(0xFF));
+    bool found = wire_.endTransmission(false) == 0 &&
+                 wire_.requestFrom(ina_probe_address_, size_t(2), true) == 2;
+    if (found) {
+      const int high = wire_.read(), low = wire_.read();
+      found = high == 0x22 && low == 0x60;
+    }
+    if (found) {
+      ina_setup_step_ = 1;
+    } else if (++ina_probe_address_ > 0x4F) {
+      ina_probe_address_ = 0x40;
+      ina_retry_at_ms_ = millis() + 5000U;
+    }
+  } else if (ina_setup_step_ == 1) {
+    const uint8_t count = ina_.begin(10, 10000);
+    ina_candidate_ = UINT8_MAX;
+    for (uint8_t i = 0; i < count; ++i) {
+      if (strcmp(ina_.getDeviceName(i), "INA226") == 0) {
+        ina_candidate_ = i;
+        ina_probe_address_ = ina_.getDeviceAddress(i);
+        break;
+      }
+    }
+    if (ina_candidate_ == UINT8_MAX) {
+      ina_setup_step_ = 0;
+      ina_retry_at_ms_ = millis() + 5000U;
+    } else {
+      ++ina_setup_step_;
+    }
+  } else {
+    // Keep each normal configuration operation in its own worker turn so
+    // queued touch and output requests retain their priority.
+    switch (ina_setup_step_++) {
+      case 2: ina_.reset(ina_candidate_); break;
+      case 3: ina_.setAveraging(4, ina_candidate_); break;
+      case 4: ina_.setBusConversion(8244, ina_candidate_); break;
+      case 5: ina_.setShuntConversion(8244, ina_candidate_); break;
+      case 6:
+        ina_.setMode(INA_MODE_CONTINUOUS_BOTH, ina_candidate_);
+        break;
+      case 7:
+        // The legacy setters do not report write status. Check the final
+        // configuration before accepting measurements from a recovered INA.
+        wire_.beginTransmission(ina_probe_address_);
+        wire_.write(uint8_t(0));
+        if (wire_.endTransmission(false) != 0 ||
+            wire_.requestFrom(ina_probe_address_, size_t(2), true) != 2) {
+          ina_setup_step_ = 2;
+          ina_retry_at_ms_ = millis() + 5000U;
+          break;
+        }
+        {
+          const int high = wire_.read(), low = wire_.read();
+          if (high < 0 || low < 0 ||
+              ((uint16_t(high) << 8 | uint16_t(low)) & 0x0FFFU) != 0x03FFU) {
+            ina_setup_step_ = 2;
+            ina_retry_at_ms_ = millis() + 5000U;
+            break;
+          }
+        }
+        ina_device_ = ina_candidate_;
+        ina_candidate_ = UINT8_MAX;
+        portENTER_CRITICAL(&state_mux_);
+        diagnostics_.ina_ready = true;
+        diagnostics_.ina_device = ina_device_;
+        portEXIT_CRITICAL(&state_mux_);
+        break;
+    }
+  }
+  recordDuration(started);
+  return true;
+}
+
 void InternalI2cService::run() {
   bool was_paused = false;
   bool ina_sleeping = false;
   bool touch_down = false;
   bool irq_pending = false;
+  bool hardware_irq_pending = false;
   bool recovered_once = false;
   uint32_t observed_generation = UINT32_MAX;
   uint32_t last_read_ms = millis() - 1000U;
@@ -382,17 +487,18 @@ void InternalI2cService::run() {
     uint32_t notifications = 0;
     (void)xTaskNotifyWait(0, UINT32_MAX, &notifications,
                          pdMS_TO_TICKS(2) ? pdMS_TO_TICKS(2) : 1);
-    if (notifications & NotifyIrq) irq_pending = true;
+    if (notifications & NotifyIrq) irq_pending = hardware_irq_pending = true;
     const Control state = control();
     if (state.pause) {
       cancelQueuedRequests();
       // Do not acknowledge while a sensor still needs its stop/sleep step.
       // Keep sensor stops separate from each other and from INA transactions.
       if (quiesceSensors()) continue;
-      if (ina_device_ != UINT8_MAX && state.power_down != ina_sleeping) {
+      const uint8_t ina = ina_device_ != UINT8_MAX ? ina_device_ : ina_candidate_;
+      if (ina != UINT8_MAX && state.power_down != ina_sleeping) {
         const uint32_t started = millis();
         ina_.setMode(state.power_down ? INA_MODE_POWER_DOWN :
-                     INA_MODE_CONTINUOUS_BOTH, ina_device_);
+                     INA_MODE_CONTINUOUS_BOTH, ina);
         ina_sleeping = state.power_down;
         recordDuration(started);
       }
@@ -400,6 +506,7 @@ void InternalI2cService::run() {
       was_paused = true;
       touch_down = false;
       irq_pending = false;
+      hardware_irq_pending = false;
       portENTER_CRITICAL(&state_mux_);
       if (pause_requested_ && generation_ == state.generation &&
           pause_power_down_ == state.power_down)
@@ -408,33 +515,36 @@ void InternalI2cService::run() {
       continue;
     }
     if (was_paused || observed_generation != state.generation) {
-      if (ina_sleeping && ina_device_ != UINT8_MAX) {
+      const uint8_t ina = ina_device_ != UINT8_MAX ? ina_device_ : ina_candidate_;
+      if (ina_sleeping && ina != UINT8_MAX) {
         const uint32_t started = millis();
-        ina_.setMode(INA_MODE_CONTINUOUS_BOTH, ina_device_);
+        ina_.setMode(INA_MODE_CONTINUOUS_BOTH, ina);
         ina_sleeping = false;
         recordDuration(started);
       }
       // Force a fresh sample even when a wake pulse has already returned HIGH.
       last_read_ms = millis() - 1000U;
-      retry_at_ms = millis();
-      irq_pending = true;
+      // RTC wake polling may resume/pause every 30 ms. Keep consecutive
+      // failures and their deadline across those polls so recovery can run.
+      if (failures == 0) {
+        retry_at_ms = millis();
+        irq_pending = true;
+      }
       touch_down = false;
-      failures = 0;
       observed_generation = state.generation;
       was_paused = false;
     }
     if (control().pause) continue;
     const uint32_t now = millis();
     const bool irq_low = irq_pin_ >= 0 && digitalRead(irq_pin_) == LOW;
-    const uint32_t fallback = touch_down ? 32U : 1000U;
     // Preserve the established touch timing/backoff and report handling. Due
     // touch reads precede both queued controls and optional sensor polling.
-    const bool touch_due = touch_enabled_ &&
-        int32_t(now - retry_at_ms) >= 0 &&
-        uint32_t(now - last_read_ms) >= 16U &&
-        (irq_pending || irq_low || uint32_t(now - last_read_ms) >= fallback);
+    const bool touch_due = touchReadDue(now, last_read_ms, retry_at_ms,
+        touch_enabled_, irq_pending, irq_low, touch_down);
     if (touch_due) {
+      const bool read_irq = hardware_irq_pending;
       irq_pending = false;
+      hardware_irq_pending = false;
       last_read_ms = now;
       uint16_t x = 0, y = 0;
       const uint32_t read_generation = control().generation;
@@ -470,6 +580,7 @@ void InternalI2cService::run() {
       failures = 0;
       retry_at_ms = sampled;
       TouchSample sample;
+      sample.irq = read_irq;
       sample.down = down;
       sample.released = released;
       sample.x = down ? x : last_x;
@@ -497,7 +608,7 @@ void InternalI2cService::run() {
       // iteration a fresh touch deadline before starting another device.
       continue;
     }
-    serviceSensors(control());
+    if (!serviceInaRecovery(touch_down)) serviceSensors(control());
   }
 }
 

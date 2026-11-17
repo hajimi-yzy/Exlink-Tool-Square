@@ -1,4 +1,4 @@
-name: Build And Release Firmware
+name: Build Firmware
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: firmware-${{ github.ref }}
@@ -36,7 +36,14 @@ jobs:
           python-version: "3.11"
 
       - name: Install PlatformIO
-        run: pip install platformio
+        run: pip install platformio==6.1.18
+
+      - name: Check Release Version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "${GITHUB_REF_NAME}" = "v$(tr -d '\r\n' < version.txt)"
 
       - name: Build Firmware
         run: pio run -e "$PIO_ENV"
@@ -76,12 +83,3 @@ jobs:
           name: firmware-${{ env.PIO_ENV }}
           path: dist/
           if-no-files-found: error
-
-      - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: Firmware ${{ github.ref_name }}
-          files: |
-            dist/*
-          generate_release_notes: true

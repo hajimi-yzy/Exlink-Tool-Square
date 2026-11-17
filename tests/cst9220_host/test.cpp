@@ -3,7 +3,11 @@
 #include <stdio.h>
 #include <string.h>
 
-void pinMode(int pin, int) { assert(pin == 16 || pin == 17); }
+static unsigned irq_pin_configurations = 0;
+void pinMode(int pin, int) {
+  assert(pin == 16 || pin == 17);
+  if (pin == 17) ++irq_pin_configurations;
+}
 void digitalWrite(int pin, int) { assert(pin == 16); }
 void delay(unsigned long) {}
 void delayMicroseconds(unsigned int) {}
@@ -73,6 +77,7 @@ int main() {
   assert(touch.readTouch(&x, &y) && touch.communicationOk());
 
   const unsigned beginBeforeRecovery = bus.beginCalls;
+  const unsigned irqBeforeRecovery = irq_pin_configurations;
   bus.activeAddress = 0x64;
   assert(touch.recover());
   assert(touch.address() == 0x64 && touch.communicationOk());
@@ -80,11 +85,13 @@ int main() {
   assert(touch.recover());
   assert(touch.address() == 0x5A && touch.isReady());
   assert(bus.beginCalls == beginBeforeRecovery);
+  assert(irq_pin_configurations == irqBeforeRecovery);
   bus.online = false;
   assert(!touch.recover() && !touch.isReady() && !touch.communicationOk());
   bus.online = true;
   assert(touch.recover() && touch.isReady() && touch.communicationOk());
   assert(bus.beginCalls == beginBeforeRecovery);
+  assert(irq_pin_configurations == irqBeforeRecovery);
 
   bus.firmware = TwoWire::Unknown;
   assert(!touch.begin());

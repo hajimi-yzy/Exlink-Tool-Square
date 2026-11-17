@@ -3,6 +3,7 @@
 #include <lvgl.h>
 #include "interaction_policy.h"
 #include "touch_lvgl_cancel.h"
+#include "touch_contact_policy.h"
 #include "production_touch_sample.h"
 #ifdef NDEBUG
 #undef NDEBUG
@@ -14,11 +15,15 @@
 static bool touch_input_enabled = true;
 static bool touch_contact_down, touch_contact_cancelled;
 static bool suppress_touch_until_release, display_idle_active;
+static exlink::WakeTouchGate wake_touch_gate;
 static uint16_t touch_contact_x, touch_contact_y;
 static uint32_t touch_contact_sample_ms, touch_consumed_sequence;
 static EdgeBackGesture edge_back_gesture;
 static unsigned activity, backs;
 static uint32_t millis() { return lv_tick_get(); }
+enum { INT_N_PIN = 17, LOW = 0, HIGH = 1 };
+static int irq_level = HIGH;
+static int digitalRead(int pin) { assert(pin == INT_N_PIN); return irq_level; }
 static void notify_user_activity() { ++activity; }
 static bool ui_edge_back_allowed() { return false; }
 static void ui_request_back() { ++backs; }
@@ -78,15 +83,17 @@ static void advance(unsigned milliseconds)
 }
 
 static void enqueue(bool down, bool released = false, bool cancelled = false,
-                    uint16_t x = 100, uint16_t y = 100)
+                    uint16_t x = 100, uint16_t y = 100, bool irq = false,
+                    uint32_t age = 0)
 {
     exlink::TouchSample sample;
     sample.down = down;
     sample.released = released;
     sample.cancelled = cancelled;
+    sample.irq = irq;
     sample.x = x;
     sample.y = y;
-    sample.sampled_ms = millis();
+    sample.sampled_ms = millis() - age;
     sample.sequence = ++sequence;
     internal_io.push(sample);
 }
@@ -106,6 +113,8 @@ static void reset()
     internal_io.clear();
     touch_input_enabled = true;
     display_idle_active = suppress_touch_until_release = false;
+    wake_touch_gate.reset();
+    irq_level = HIGH;
     touch_contact_down = touch_contact_cancelled = false;
     touch_contact_sample_ms = 0;
     edge_back_gesture = EdgeBackGesture();
@@ -249,6 +258,68 @@ int main(int argc, char **argv)
     display_idle_active = false;
     tap();
     assert(clicks == 2);
+
+    reset();
+    clear_touch_contact();
+    advance(200); // No worker reports cannot clear the wake-contact gate.
+    assert(wake_touch_gate.blocked() && suppress_touch_until_release);
+    for (unsigned i = 0; i < 8; ++i) {
+        enqueue(true);
+        advance(30);
+        assert(!lv_obj_has_state(button, LV_STATE_PRESSED));
+    }
+    advance(100); // Contact expiry must not turn a held wake touch into a tap.
+    enqueue(true);
+    advance(30);
+    assert(wake_touch_gate.blocked() && !clicks);
+    enqueue(false, true);
+    advance(30);
+    assert(!wake_touch_gate.blocked() && !clicks);
+    tap();
+    assert(clicks == 1);
+
+    reset();
+    clear_touch_contact();
+    enqueue(false, true, false, 100, 100, false, 100); // Stale UP is not proof.
+    advance(30);
+    assert(wake_touch_gate.blocked());
+    enqueue(false); // First fresh successful empty report starts quiet time.
+    advance(150); // A timer/cache gap alone cannot complete quiet confirmation.
+    assert(wake_touch_gate.blocked());
+    enqueue(false, false, true); // Cancellation resets the quiet window.
+    advance(30);
+    enqueue(false);
+    advance(120);
+    enqueue(false, false, false, 100, 100, true); // A new IRQ resets it again.
+    advance(30);
+    enqueue(false);
+    advance(120);
+    irq_level = LOW;
+    enqueue(false); // A currently low INT also prevents quiet unlock.
+    advance(30);
+    assert(wake_touch_gate.blocked());
+    irq_level = HIGH;
+    enqueue(false);
+    advance(120);
+    enqueue(false);
+    advance(30);
+    assert(!wake_touch_gate.blocked() && !clicks);
+    tap();
+    assert(clicks == 1);
+
+    reset();
+    display_idle_active = true;
+    enqueue(true);
+    consume_touch_sample(true); // Screen saver receives the wake-down first.
+    display_idle_active = false;
+    advance(120); // Model SLPOUT delay before the first live UI input poll.
+    enqueue(true);
+    advance(30);
+    assert(wake_touch_gate.blocked() && !clicks);
+    enqueue(false, true);
+    advance(30);
+    tap();
+    assert(clicks == 1);
 
     reset();
     touch_input_enabled = false;

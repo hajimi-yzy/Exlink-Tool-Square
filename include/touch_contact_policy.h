@@ -4,6 +4,47 @@
 
 namespace exlink {
 
+// Consume the contact that woke the display. Empty cache entries and elapsed
+// time alone cannot release it. The no-UP fallback requires separate fresh,
+// successfully read empty reports while INT stays high; it is a conservative
+// input gate, not a claim that an empty mailbox proves a physical finger-up.
+class WakeTouchGate {
+ public:
+  void reset() { blocked_ = quiet_ = have_event_ = false; }
+  void block() { blocked_ = true; quiet_ = have_event_ = false; }
+  bool blocked() const { return blocked_; }
+
+  void update(bool down, bool released, bool cancelled, bool irq,
+              bool irq_high, uint32_t sampled_ms, uint32_t now) {
+    if (!blocked_) return;
+    if (have_event_ && int32_t(sampled_ms - last_event_ms_) < 0) return;
+    if (uint32_t(now - sampled_ms) >= 75U) {
+      quiet_ = false;
+      return;
+    }
+    have_event_ = true;
+    last_event_ms_ = sampled_ms;
+    if (released && !down && !cancelled) {
+      blocked_ = quiet_ = false;
+      return;
+    }
+    if (down || cancelled || irq || !irq_high) {
+      quiet_ = false;
+      return;
+    }
+    if (!quiet_) {
+      quiet_ = true;
+      quiet_since_ms_ = sampled_ms;
+    } else if (uint32_t(sampled_ms - quiet_since_ms_) >= 100U) {
+      blocked_ = quiet_ = false;
+    }
+  }
+
+ private:
+  bool blocked_ = false, quiet_ = false, have_event_ = false;
+  uint32_t quiet_since_ms_ = 0, last_event_ms_ = 0;
+};
+
 // Cache-only input policy. A missing/bad sample cancels a contact; it is never
 // a finger-up event that may click a widget. A cancelled finger must actually
 // lift before a later point is allowed to start another contact.

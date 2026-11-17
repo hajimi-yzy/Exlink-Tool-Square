@@ -4,6 +4,7 @@
 class CST9220 {
  public:
   bool communication_ok = true, down = true;
+  unsigned recoveries = 0;
   std::vector<uint32_t> reads;
   int interruptPin() const { return 7; }
   bool isReady() const { return communication_ok; }
@@ -15,5 +16,5 @@ class CST9220 {
   }
   bool communicationOk() const { return communication_ok; }
   bool releaseReported() const { return !down && communication_ok; }
-  bool recover() { return communication_ok; }
+  bool recover() { ++recoveries; return communication_ok; }
 };

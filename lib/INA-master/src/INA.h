@@ -290,6 +290,7 @@ class INA_Class {
   int64_t     getBusMicroWatts(const uint8_t deviceNumber = 0);
   const char* getDeviceName(const uint8_t deviceNumber = 0);
   uint8_t     getDeviceAddress(const uint8_t deviceNumber = 0);
+  bool        lastReadOk() const { return _lastReadOk; }
   void        reset(const uint8_t deviceNumber = 0);
   bool        conversionFinished(const uint8_t deviceNumber = 0);
   void        waitForConversion(const uint8_t deviceNumber = UINT8_MAX);
@@ -309,6 +310,7 @@ class INA_Class {
   uint16_t _EEPROM_size = 512;  ///< Default EEPROM reserved space for ESP32 and ESP8266
   #endif
  private:
+  mutable bool _lastReadOk{true};
   int16_t    readWord(const uint8_t addr, const uint8_t deviceAddress) const;
   void       writeWord(const uint8_t addr, const uint16_t data, const uint8_t deviceAddress) const;
   void       readInafromEEPROM(const uint8_t deviceNumber);

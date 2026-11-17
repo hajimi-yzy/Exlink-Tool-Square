@@ -30,7 +30,8 @@ uint8_t TwoWire::endTransmission(bool) {
   const host::BusEvent event{millis(), address_, false, tx_, tx_.size()};
   events.push_back(event);
   const bool failed = ((address_ == 0x68 || address_ == 0x69) && fail_mpu) ||
-                      (address_ == 0x38 && fail_aht);
+                      (address_ == 0x38 && fail_aht) ||
+                      (address_ >= 0x40 && address_ <= 0x4F && fail_ina);
   if (failed) host::advance(timeout);
   if (!failed && address_ == 0x2F && !tx_.empty()) wiper = tx_[0];
   if (!failed && address_ == 0x68 && !tx_.empty()) {
@@ -40,6 +41,7 @@ uint8_t TwoWire::endTransmission(bool) {
       if (reg_ == 0x6B && tx_[1] == 0x80) mpu[reg_] = 0;
     }
   }
+  if (!failed && address_ == 0x40 && !tx_.empty()) reg_ = tx_[0];
   notifyBus(event);
   return failed ? 4 : 0;
 }
@@ -49,7 +51,8 @@ size_t TwoWire::requestFrom(uint8_t address, size_t count, bool) {
   events.push_back(event);
   rx_.clear();
   const bool failed = ((address == 0x68 || address == 0x69) && fail_mpu) ||
-                      (address == 0x38 && fail_aht);
+                      (address == 0x38 && fail_aht) ||
+                      (address >= 0x40 && address <= 0x4F && fail_ina);
   if (failed) {
     host::advance(timeout);
     notifyBus(event);
@@ -61,6 +64,9 @@ size_t TwoWire::requestFrom(uint8_t address, size_t count, bool) {
     uint8_t frame[] = {0x08, 0x80, 0x00, 0x06, 0x00, 0x00, 0};
     frame[6] = crc(frame) ^ (corrupt_aht_crc ? 1 : 0);
     for (size_t i = 0; i < count; ++i) rx_.push_back(frame[i]);
+  } else if (address == 0x40 && count == 2) {
+    const uint16_t value = reg_ == 0xFF ? 0x2260 : 0x43FF;
+    rx_.push_back(uint8_t(value >> 8)); rx_.push_back(uint8_t(value));
   } else if (address == 0x68 && reg_ == 0x3B && count == 14) {
     // Static 30-degree roll, zero pitch, 1 g, and stationary gyro.
     const uint8_t frame[] = {0, 0, 0x20, 0, 0x37, 0x6D, 0, 0, 0, 0, 0, 0, 0, 0};
@@ -84,9 +90,9 @@ struct Fixture {
   INA_Class ina;
   Mcp4017Controller<TwoWire> power;
   InternalI2cService service;
-  Fixture() : power(wire), service(wire, touch, ina, power) {
+  explicit Fixture(uint8_t ina_device = 0) : power(wire), service(wire, touch, ina, power) {
     host::runtime = host::Runtime{};
-    require(service.begin(true, 0), "begin worker");
+    require(service.begin(true, ina_device), "begin worker");
     require(wire.timeout == 20, "shared Wire timeout remains bounded");
   }
   void run(uint32_t deadline, const std::function<void()> &hook = {}) {
@@ -342,6 +348,135 @@ void corruptAhtFrame() {
   checkTouchCadence(fixture, 18);
   std::cout << "PASS bad AHT CRC remains unavailable and backs off\n";
 }
+
+void transientSensorRecovery() {
+  Fixture fixture;
+  fixture.service.setLevelActive(true);
+  fixture.service.setEnvironmentActive(true);
+  bool failed = false, restored = false, checked = false;
+  fixture.run(7000, [&] {
+    if (!failed && millis() >= 1500) {
+      require(fixture.service.levelSample().available &&
+              fixture.service.environmentSample().available,
+              "both sensors work before injected bus failures");
+      fixture.wire.fail_mpu = fixture.wire.fail_aht = true;
+      failed = true;
+    } else if (failed && !restored && millis() >= 2800) {
+      require(!fixture.service.levelSample().available &&
+              !fixture.service.environmentSample().available,
+              "transport failures invalidate sensor data");
+      fixture.wire.fail_mpu = fixture.wire.fail_aht = false;
+      restored = true;
+    } else if (restored && !checked && millis() >= 6500) {
+      require(fixture.service.levelSample().available &&
+              fixture.service.environmentSample().available,
+              "transient sensor failures recover without reopening pages");
+      require(fixture.service.levelSample().sampled_ms > 2800 &&
+              fixture.service.environmentSample().sampled_ms > 2800,
+              "recovered caches contain fresh data");
+      checked = true;
+    }
+  });
+  require(checked, "transient failure/recovery timeline completed");
+  checkTouchCadence(fixture, 43);
+  std::cout << "PASS transient MPU/AHT failure invalidation and automatic recovery\n";
+}
+
+void missingInaRecovery() {
+  Fixture fixture(UINT8_MAX);
+  fixture.touch.down = false;
+  fixture.wire.fail_ina = true;
+  require(!fixture.service.diagnostics().ina_ready, "missing INA starts unavailable");
+  bool restored = false, requested = false, completed = false;
+  fixture.run(12000, [&] {
+    if (!restored && millis() >= 7000) {
+      require(fixture.ina.enumerations == 0,
+              "missing INA never causes library-wide rescans");
+      fixture.wire.fail_ina = false;
+      restored = true;
+    }
+    if (restored && !requested && fixture.service.diagnostics().ina_ready) {
+      require(fixture.service.diagnostics().ina_device == 0,
+              "recovered INA index is published");
+      require(fixture.service.submit(IoRequestKind::Measurement, 0, 71),
+              "measurement accepted after recovery");
+      requested = true;
+    }
+    IoResult result;
+    if (requested && fixture.service.takeResult(result)) {
+      require(result.id == 71 && !result.cancelled && result.millivolts == 5001,
+              "missing-at-boot INA can provide measurements without reboot");
+      completed = true;
+    }
+  });
+  require(completed && fixture.ina.enumerations == 1 &&
+          fixture.ina.configuration_steps == 4,
+          "INA recovery enumerates once and configures in separate turns");
+  require(fixture.touch.reads.size() > 500, "INA recovery keeps touch alive");
+  std::cout << "PASS absent INA backoff, one-time recovery, fresh measurement\n";
+}
+
+void failedInaReadIsCancelled() {
+  Fixture fixture;
+  fixture.ina.read_ok = false;
+  require(fixture.service.submit(IoRequestKind::Measurement, 0, 72), "queue failing measurement");
+  fixture.run(100);
+  IoResult result;
+  require(fixture.service.takeResult(result) && result.id == 72 && result.cancelled,
+          "INA transport failure never publishes a valid measurement");
+  require(fixture.ina.voltage_reads == 1 && fixture.ina.current_reads == 0,
+          "measurement stops at first failed register read");
+  std::cout << "PASS INA transport failure cancels rather than publishes fake voltage\n";
+}
+
+void freshIrqBypassesErrorBackoff() {
+  Fixture fixture;
+  fixture.touch.communication_ok = false;
+  fixture.touch.down = false;
+  host::runtime.irq_low = false;
+  bool injected = false;
+  fixture.run(90, [&] {
+    if (!injected && millis() >= 40) {
+      fixture.touch.communication_ok = true;
+      host::runtime.notifications |= 1U;
+      injected = true;
+    }
+  });
+  require(fixture.touch.reads.size() == 2 && fixture.touch.reads[1] < 70,
+          "a real new edge reaches production worker during error backoff");
+  require(fixture.service.diagnostics().touch_errors == 1 &&
+          fixture.service.diagnostics().touch_ready,
+          "successful edge read recovers touch state");
+  std::cout << "PASS production worker honors fresh IRQ within bounded error backoff\n";
+}
+
+void rtcPollingKeepsFailuresAndInterruptOwnership() {
+  Fixture fixture;
+  fixture.touch.communication_ok = false;
+  fixture.touch.down = false;
+  require(fixture.service.suspendTouchInterruptForSleep(), "normal touch IRQ disabled for sleep");
+  require(!host::runtime.irq_enabled, "sleep starts without app ISR");
+  host::runtime.irq_type = 0; // gpio_wakeup_enable replaces FALLING with LOW.
+  bool paused = false;
+  uint32_t next_transition = 90;
+  fixture.run(2200, [&] {
+    require(!host::runtime.irq_enabled, "RTC polls do not re-enable level ISR");
+    if (millis() >= next_transition) {
+      if (paused) fixture.service.resume();
+      else (void)fixture.service.pause(true, 0);
+      paused = !paused;
+      next_transition = millis() + (paused ? 30U : 90U);
+    }
+  });
+  require(fixture.touch.recoveries > 0,
+          "consecutive failures survive RTC pause/resume and reach recovery");
+  require(fixture.touch.reads.size() < 12, "RTC polling retains error backoff");
+  fixture.service.restoreTouchInterruptAfterSleep();
+  require(host::runtime.irq_enabled && host::runtime.irq_type == 2 &&
+          host::runtime.irq_enables == 1,
+          "final wake restores FALLING before enabling normal ISR");
+  std::cout << "PASS repeated RTC wake polls preserve fault recovery and IRQ ownership\n";
+}
 }
 
 int main() {
@@ -353,6 +488,11 @@ int main() {
     inFlightGenerationChanges();
     zeroFreshness();
     corruptAhtFrame();
+    transientSensorRecovery();
+    missingInaRecovery();
+    failedInaReadIsCancelled();
+    freshIrqBypassesErrorBackoff();
+    rtcPollingKeepsFailuresAndInterruptOwnership();
     std::cout << "All real InternalI2cService integration tests passed.\n";
     return 0;
   } catch (const std::exception &error) {

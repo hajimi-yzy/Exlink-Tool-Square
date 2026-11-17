@@ -1,0 +1,123 @@
+{
+  "groups": 17,
+  "checks": 18,
+  "passed": 18,
+  "results": [
+    {
+      "name": "touch_driver_and_power",
+      "exit_code": 0,
+      "seconds": 19.72,
+      "log": "touch_driver_and_power.log"
+    },
+    {
+      "name": "touch_contact_and_schedule",
+      "exit_code": 0,
+      "seconds": 13.62,
+      "log": "touch_contact_and_schedule.log"
+    },
+    {
+      "name": "mpu_driver",
+      "exit_code": 0,
+      "seconds": 10.62,
+      "log": "mpu_driver.log"
+    },
+    {
+      "name": "aht_driver",
+      "exit_code": 0,
+      "seconds": 8.88,
+      "log": "aht_driver.log"
+    },
+    {
+      "name": "pwm_servo_handoff",
+      "exit_code": 0,
+      "seconds": 6.67,
+      "log": "pwm_servo_handoff.log"
+    },
+    {
+      "name": "scope_analysis",
+      "exit_code": 0,
+      "seconds": 3.61,
+      "log": "scope_analysis.log"
+    },
+    {
+      "name": "ble_update_transactions",
+      "exit_code": 0,
+      "seconds": 13.86,
+      "log": "ble_update_transactions.log"
+    },
+    {
+      "name": "scope_capture",
+      "exit_code": 0,
+      "seconds": 32.66,
+      "log": "scope_capture.log"
+    },
+    {
+      "name": "scope_ui",
+      "exit_code": 0,
+      "seconds": 116.91,
+      "log": "scope_ui.log"
+    },
+    {
+      "name": "touch_lvgl",
+      "exit_code": 0,
+      "seconds": 124.33,
+      "log": "touch_lvgl.log"
+    },
+    {
+      "name": "native_ui",
+      "exit_code": 0,
+      "seconds": 131.58,
+      "log": "native_ui.log"
+    },
+    {
+      "name": "navigation_stress",
+      "exit_code": 0,
+      "seconds": 111.51,
+      "log": "navigation_stress.log"
+    },
+    {
+      "name": "sleep_wake",
+      "exit_code": 0,
+      "seconds": 20.78,
+      "log": "sleep_wake.log"
+    },
+    {
+      "name": "internal_i2c",
+      "exit_code": 0,
+      "seconds": 18.12,
+      "log": "internal_i2c.log"
+    },
+    {
+      "name": "ina_transport",
+      "exit_code": 0,
+      "seconds": 15.3,
+      "log": "ina_transport.log"
+    },
+    {
+      "name": "display_contracts",
+      "exit_code": 0,
+      "seconds": 3.12,
+      "log": "display_contracts.log"
+    },
+    {
+      "name": "measurement_results",
+      "exit_code": 0,
+      "seconds": 19.55,
+      "log": "measurement_results.log"
+    },
+    {
+      "name": "legacy_measurement_detection",
+      "exit_code": 0,
+      "seconds": 20.73,
+      "log": "legacy_measurement_detection.log"
+    }
+  ],
+  "firmware": "1.0.24",
+  "test_host": "Windows x86_64",
+  "python": "3.11",
+  "zig": "0.13.0",
+  "platformio": "6.1.18",
+  "date": "2026-11-17",
+  "hardware_tested_version": "1.0.24-rc1",
+  "hardware_scope": "dial/touch/short sleep wake user-confirmed; I2C and USB issues remain"
+}

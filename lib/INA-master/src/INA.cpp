@@ -105,10 +105,14 @@ int16_t INA_Class::readWord(const uint8_t addr, const uint8_t deviceAddress) con
       @return    integer value read from the I2C device */
   Wire.beginTransmission(deviceAddress);        // Address the I2C device
   Wire.write(addr);                             // Send register address to read
-  Wire.endTransmission();                       // Close transmission
+  _lastReadOk = false;
+  if (Wire.endTransmission() != 0) return 0;
   delayMicroseconds(I2C_DELAY);                 // delay required for sync
-  Wire.requestFrom(deviceAddress, (uint8_t)2);  // Request 2 consecutive bytes
-  return ((uint16_t)Wire.read() << 8) | Wire.read();
+  if (Wire.requestFrom(deviceAddress, (uint8_t)2) != 2) return 0;
+  const int high = Wire.read(), low = Wire.read();
+  if (high < 0 || low < 0) return 0;
+  _lastReadOk = true;
+  return (uint16_t(high) << 8) | uint16_t(low);
 }  // of method readWord()
 void INA_Class::writeWord(const uint8_t addr, const uint16_t data,
                           const uint8_t deviceAddress) const {
@@ -211,7 +215,7 @@ uint8_t INA_Class::begin(const uint16_t maxBusAmps, const uint32_t microOhmR,
   uint16_t originalRegister, tempRegister;
   if (_DeviceCount == 0)  // Enumerate all devices on first call
   {
-    uint16_t maxDevices = 32;
+    uint16_t maxDevices = _expectedDevices ? _expectedDevices : 32;
 /***************************************************************************************************
 ** The AVR devices need to use EEPROM to save memory, some other devices have emulation for EEPROM**
 ** functionality while some devices have no such function calls. This library caters for these    **
@@ -220,8 +224,10 @@ uint8_t INA_Class::begin(const uint16_t maxBusAmps, const uint32_t microOhmR,
 ** runtime to allocate sufficient space for 32 devices.                                           **
 ***************************************************************************************************/
 #if defined(ESP32) || defined(ESP8266)
-    EEPROM.begin(_EEPROM_size + _EEPROM_offset);  // If ESP32 then allocate 512 Bytes
-    maxDevices = (_EEPROM_size) / sizeof(inaEE);  // and compute number of devices
+    if (_expectedDevices == 0) {
+      EEPROM.begin(_EEPROM_size + _EEPROM_offset);
+      maxDevices = (_EEPROM_size) / sizeof(inaEE);
+    }
 #elif defined(__STM32F1__)                        // Emulated EEPROM for STM32F1
     maxDevices                     = (EEPROM.maxcount() - _EEPROM_offset) / sizeof(inaEE);  // Compute max possible
 #elif defined(CORE_TEENSY)                        // TEENSY doesn't have EEPROM.length
@@ -245,8 +251,10 @@ uint8_t INA_Class::begin(const uint16_t maxBusAmps, const uint32_t microOhmR,
       if (good == 0 && _DeviceCount < maxDevices)  // If no error and EEPROM has space
       {
         originalRegister = readWord(INA_CONFIGURATION_REGISTER, deviceAddress);  // Save settings
+        if (!_lastReadOk) continue;
         writeWord(INA_CONFIGURATION_REGISTER, INA_RESET_DEVICE, deviceAddress);  // Force reset
         tempRegister = readWord(INA_CONFIGURATION_REGISTER, deviceAddress);      // Read reset reg.
+        if (!_lastReadOk) continue;
         if (tempRegister == INA_RESET_DEVICE)  // If the register wasn't reset then not an INA
         {
           writeWord(INA_CONFIGURATION_REGISTER, originalRegister, deviceAddress);  // restore value
@@ -257,6 +265,7 @@ uint8_t INA_Class::begin(const uint16_t maxBusAmps, const uint32_t microOhmR,
             if (tempRegister == 0x4127)  // INA226, INA230, INA231
             {
               tempRegister = readWord(INA_DIE_ID_REGISTER, deviceAddress);  // Read the INA high-reg
+              if (!_lastReadOk) continue;
               if (tempRegister == INA226_DIE_ID_VALUE) {
                 inaEE.type = INA226;
               } else {
@@ -285,24 +294,26 @@ uint8_t INA_Class::begin(const uint16_t maxBusAmps, const uint32_t microOhmR,
             inaEE.microOhmR  = microOhmR;
             ina              = inaEE;  // see inaDet constructor
             if (inaEE.type == INA3221_0) {
+              if (uint16_t(_DeviceCount) + 3 > maxDevices) continue;
               ina.type = INA3221_0;  // Set to INA3221 1st channel
               initDevice(_DeviceCount);
-              _DeviceCount = ((_DeviceCount + 1) % maxDevices);
+              ++_DeviceCount;
               ina.type     = INA3221_1;  // Set to INA3221 2nd channel
               initDevice(_DeviceCount);
-              _DeviceCount = ((_DeviceCount + 1) % maxDevices);
+              ++_DeviceCount;
               ina.type     = INA3221_2;  // Set to INA3221 3rd channel
               initDevice(_DeviceCount);
-              _DeviceCount = ((_DeviceCount + 1) % maxDevices);
+              ++_DeviceCount;
             } else {
               initDevice(_DeviceCount);                          // perform initialization on device
-              _DeviceCount = ((_DeviceCount + 1) % maxDevices);  // start again at 0 if overflow
+              ++_DeviceCount;
             }                                                    // of if-then inaEE.type
           }                                                      // of if-then we can add device
         }  // of if-then-else we have an INA-Type device
       }    // of if-then we have a device
     }      // for-next each possible I2C address
   } else {
+    if (deviceNumber >= _DeviceCount) return _DeviceCount;
     readInafromEEPROM(deviceNumber);                         // Load EEPROM to ina structure
     ina.maxBusAmps = maxBusAmps > 1022 ? 1022 : maxBusAmps;  // Clamp to maximum of 1022A
     ina.microOhmR  = microOhmR;

@@ -20,6 +20,7 @@
 #include "mcp4017_control.h"
 #include "internal_i2c_service.h"
 #include "touch_lvgl_cancel.h"
+#include "touch_contact_policy.h"
 #include "level_page.h"
 #include "environment_page.h"
 #include "scope_capture.h"
@@ -108,7 +109,9 @@ unsigned long previousMillis = 0; // 记录上次读取计数的时间
 
 const long interval = 125; // 设置脉冲读取间隔为125毫秒
 
-INA_Class INA;
+// Only one INA226 is fitted. Keep its runtime configuration in RAM; sleep
+// mode changes must not commit EEPROM/NVS on every RTC polling cycle.
+INA_Class INA(1);
 int8_t request_index = 0;
 char voltageStr[20], currentStr[20], powerStr[20], mAHStr[20]; // 存储ina226测量数据
 uint64_t vol, cur, wat;
@@ -249,6 +252,7 @@ uint32_t screen_idle_timeout_s = 30;
 uint32_t screen_photo_duration_s = 5;
 static uint32_t last_user_activity_ms = 0;
 static bool suppress_touch_until_release = false;
+static exlink::WakeTouchGate wake_touch_gate;
 static bool suppress_keys_until_release = false;
 static bool touch_contact_down = false;
 static bool touch_contact_cancelled = false;
@@ -292,6 +296,8 @@ static void co5300_power_sequence(void)
   digitalWrite(LCD_VCI_EN, LOW);
   pinMode(LCD_RST, OUTPUT);
   digitalWrite(LCD_RST, LOW);
+  pinMode(LCD_CS, OUTPUT);
+  digitalWrite(LCD_CS, HIGH);
   pinMode(LCD_TE, INPUT); // TE is an optional panel output; no pull resistor.
   delay(10);
 
@@ -2601,6 +2607,7 @@ static void internal_io_results_task()
     } else if (result.id == ina_pending_id) {
       ina_pending_id = 0;
       if (!result.cancelled) { ina_sample = result; ina_sample_ready = true; }
+      else ina266_reset_measurement();
     }
   }
 }
@@ -3702,6 +3709,7 @@ static void clear_touch_contact()
   touch_contact_cancelled = false;
   touch_contact_sample_ms = 0;
   suppress_touch_until_release = true;
+  wake_touch_gate.block();
   edge_back_gesture.update(false, 0, 0, false);
 }
 
@@ -3712,6 +3720,12 @@ static bool consume_touch_sample(bool idle, bool gpio_woke = false)
   exlink::TouchSample sample;
   if (!internal_io.takeTouch(sample)) return false;
   touch_consumed_sequence = sample.sequence;
+  const uint32_t now = millis();
+  if (idle && sample.down && uint32_t(now - sample.sampled_ms) < 75U)
+    wake_touch_gate.block();
+  wake_touch_gate.update(sample.down, sample.released, sample.cancelled,
+                         sample.irq, digitalRead(INT_N_PIN) == HIGH,
+                         sample.sampled_ms, now);
   if (sample.down && millis() - sample.sampled_ms < 75U) {
     touch_contact_x = sample.x;
     touch_contact_y = sample.y;
@@ -3767,7 +3781,7 @@ void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
   }
   if (display_idle_active || suppress_touch_until_release)
   {
-    suppress_touch_until_release = touch_contact_down;
+    suppress_touch_until_release = wake_touch_gate.blocked() || touch_contact_down;
     edge_back_gesture.update(false, 0, 0, false);
     return;
   }
@@ -4025,7 +4039,7 @@ static void restore_active_display(bool was_sleeping)
   display_idle_active = false;
   display_resume_pending = false;
   touch_contact_cancelled = false;
-  suppress_touch_until_release = touch_contact_down;
+  suppress_touch_until_release = wake_touch_gate.blocked() || touch_contact_down;
   suppress_keys_until_release = any_key_down();
   lv_obj_invalidate(lv_scr_act());
   lv_refr_now(NULL);
@@ -4105,22 +4119,36 @@ static void enter_display_sleep()
     (gpio_num_t)INT_N_PIN,
 #endif
     (gpio_num_t)RIGHT_PIN, (gpio_num_t)LEFT_PIN, (gpio_num_t)PUSH_PIN};
-  bool wake_config_ok = bleStopped;
-  for (gpio_num_t pin : wake_pins)
-    wake_config_ok = gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL) == ESP_OK && wake_config_ok;
-  wake_config_ok = esp_sleep_enable_gpio_wakeup() == ESP_OK && wake_config_ok;
-  // Backup RTC polling: a missed short IRQ must not make touch wake impossible.
-  // These timer wakeups remain dark and do not run the normal application loop.
-  wake_config_ok = esp_sleep_enable_timer_wakeup(30000ULL) == ESP_OK && wake_config_ok;
+  // GPIO wakeup temporarily changes INT's interrupt type to LOW_LEVEL. Keep
+  // the normal touch ISR disabled until FALLING has been restored on exit.
+  const bool touch_irq_suspended = internal_io.suspendTouchInterruptForSleep();
+  bool wake_config_ok = bleStopped && (!touch_input_enabled || touch_irq_suspended);
+  if (wake_config_ok) {
+    for (gpio_num_t pin : wake_pins)
+      wake_config_ok = gpio_wakeup_enable(pin, GPIO_INTR_LOW_LEVEL) == ESP_OK && wake_config_ok;
+    wake_config_ok = esp_sleep_enable_gpio_wakeup() == ESP_OK && wake_config_ok;
+    // Backup RTC polling: a missed short IRQ must not make touch wake impossible.
+    // These timer wakeups remain dark and do not run the normal application loop.
+    wake_config_ok = esp_sleep_enable_timer_wakeup(30000ULL) == ESP_OK && wake_config_ok;
+  }
   if (!wake_config_ok) APP_LOGW("sleep", "wake configuration failed; restoring UI\r\n");
   while (wake_config_ok && !display_resume_pending)
   {
     const esp_err_t error = esp_light_sleep_start();
+    if (error != ESP_OK) {
+      // A rejected/failed sleep must not strand the device in a dark retry
+      // loop (for example when a wake IRQ is already held low).
+      APP_LOGW("sleep", "light-sleep failed: %d; restoring UI\r\n", int(error));
+      break;
+    }
     // A paused worker has no fresh touch cache. Resume it for a new IRQ read
     // before deciding whether this wake was user input or just the RTC timer.
     const uint32_t wake_sequence = touch_consumed_sequence;
     internal_io.resume();
     const bool gpio_woke = esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_GPIO;
+    // The wake pulse can have ended before tasks and the I2C bus resume.
+    // Latch the hardware wake cause even if a new touch report is unavailable.
+    if (gpio_woke) notify_user_activity();
     const uint32_t wake_started = millis();
     idle_touch_poll_ms = millis() - 16U;
     do {
@@ -4136,11 +4164,11 @@ static void enter_display_sleep()
       }
       clear_touch_contact();
     }
-    if (error != ESP_OK && !display_resume_pending) delay(30);
   }
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
   for (gpio_num_t pin : wake_pins) gpio_wakeup_disable(pin);
+  if (touch_irq_suspended) internal_io.restoreTouchInterruptAfterSleep();
   timerAlarmEnable(tim1);
   internal_io.resume();
   restore_active_display(true);
@@ -4226,6 +4254,31 @@ static void display_idle_task()
   }
   idle_last_expression = expression_index;
   idle_last_frame = frame;
+}
+
+static uint8_t initialize_ina_at_boot()
+{
+  // A missing peripheral must not hold the whole UI on a black startup frame.
+  // Runtime recovery belongs to the single-owner I2C worker.
+  for (unsigned attempt = 0; attempt < 3; ++attempt) {
+    const uint8_t found = INA.begin(10, 10000);
+    for (uint8_t i = 0; i < found; ++i) {
+      if (strcmp(INA.getDeviceName(i), "INA226") != 0) continue;
+      INA.reset(i);
+      INA.setAveraging(4, i);
+      INA.setBusConversion(8244, i);
+      INA.setShuntConversion(8244, i);
+      INA.setMode(INA_MODE_CONTINUOUS_BOTH, i);
+      APP_LOGI("ina", "Found INA at device number %u\r\n", unsigned(i));
+      return i;
+    }
+    // The library enumerates only while its internal count is zero; a
+    // nonempty list without INA226 cannot be rescanned with this API.
+    if (found) break;
+    if (attempt < 2) delay(100);
+  }
+  APP_LOGW("ina", "INA226 unavailable at boot; UI continues, worker will retry\r\n");
+  return UINT8_MAX;
 }
 
 void setup()
@@ -4350,36 +4403,7 @@ void setup()
   // INA and CST9220 share the board's internal I2C pins.
   Wire.begin(INTERNAL_I2C_SDA, INTERNAL_I2C_SCL, INTERNAL_I2C_HZ);
   Wire1.begin(EXTERNAL_I2C_SDA, EXTERNAL_I2C_SCL);
-  uint8_t devicesFound = 0;
-  while (deviceNumber == UINT8_MAX)
-  {
-    devicesFound = INA.begin(10, 10000);
-    if (devicesFound > 0)
-    {
-      APP_LOGI("ina", "%s\r\n", INA.getDeviceName(devicesFound - 1));
-    }
-    for (uint8_t i = 0; i < devicesFound; i++)
-    {
-
-      if (strcmp(INA.getDeviceName(i), "INA226") == 0)
-      {
-        deviceNumber = i;
-        INA.reset(deviceNumber);
-
-        break;
-      }
-    }
-    if (deviceNumber == UINT8_MAX)
-    {
-      APP_LOGW("ina", "No INA found. Waiting 5s and retrying...\r\n");
-      delay(5000);
-    }
-  }
-  APP_LOGI("ina", "Found INA at device number %u\r\n\r\n", (unsigned)deviceNumber);
-  INA.setAveraging(4, deviceNumber);
-  INA.setBusConversion(8244, deviceNumber);            // 最大转换时间8.244ms
-  INA.setShuntConversion(8244, deviceNumber);          // 最大转换时间8.244ms
-  INA.setMode(INA_MODE_CONTINUOUS_BOTH, deviceNumber); // 连续转换模式
+  deviceNumber = initialize_ina_at_boot();
 
   // Wire.begin() leaves an already initialized master on its existing pins.
   // Finish all startup transactions before handing this bus to its worker.
