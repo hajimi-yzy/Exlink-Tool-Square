@@ -15,7 +15,9 @@
 
 [下载 App、固件和完整软件包](https://github.com/hajimi-yzy/Exlink-Tool-Square/releases/latest)
 
-当前版本：固件 **1.0.22**，App **0.4.0**。
+当前版本：固件 **1.0.24**，App **0.4.0**。
+
+验证范围及已知问题见 [v1.0.24 测试结果](docs/RELEASE_1.0.24.md)。
 
 ## 目录
 
@@ -26,7 +28,7 @@
 | `android/` | Android App 源码 |
 | `firmware/` | 应用固件、USB 完整镜像与刷写说明 |
 | `app/` | Android 安装包 |
-| `scripts/`、`tests/`、`docs/` | 构建工具、测试与开发文档 |
+| `scripts/`、`docs/` | 构建工具与使用文档 |
 
 ## 构建
 

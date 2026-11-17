@@ -29,6 +29,3 @@ UART 连接应共地并交叉 TX/RX，电平需符合接口要求。串口和蓝
 
 启动日志中的 reset reason 可辅助区分异常：3 为 panic，6 为任务看门狗，
 9 为 brownout。电气复位仍需结合供电和信号测量判断。
-
-相关测试：`tests/ble_session_policy_test.cpp`、
-`tests/bridge_text_format_test.cpp`。桌面测试不能替代实际无线与串口测试。

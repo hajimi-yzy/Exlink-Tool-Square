@@ -17,7 +17,7 @@
 
 当前版本：固件 **1.0.24**，App **0.4.0**。
 
-本次修改与已知限制见 [v1.0.24 说明](docs/RELEASE_1.0.24.md)。
+验证范围及已知问题见 [v1.0.24 测试结果](docs/RELEASE_1.0.24.md)。
 
 ## 目录
 
@@ -28,7 +28,7 @@
 | `android/` | Android App 源码 |
 | `firmware/` | 应用固件、USB 完整镜像与刷写说明 |
 | `app/` | Android 安装包 |
-| `scripts/`、`tests/`、`docs/` | 构建工具、测试与开发文档 |
+| `scripts/`、`docs/` | 构建工具与使用文档 |
 
 ## 构建
 
@@ -40,14 +40,6 @@ python -m platformio run -e esp32s3
 ```
 
 输出为 `.pio/build/esp32s3/firmware.bin`，默认内部 I²C 频率 100 kHz。刷写方法见 [固件说明](firmware/README.md)。
-
-使用 Python 3.11 与 Zig 0.13.0 运行可靠性回归：
-
-```sh
-python scripts/run_reliability_tests.py --output deliverables/reliability-tests
-```
-
-可通过 `--compiler` 或 `ZIG_EXE` 指定 Zig。主机测试的覆盖和实机验证边界见版本说明。
 
 Android App 使用 JDK 17、Android SDK 35：
 

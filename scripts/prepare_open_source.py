@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import zipfile
 
-SOURCE_ROOTS = {"src", "include", "lib", "vendor", "scripts", "test", "tests", "android", "docs", ".github"}
+SOURCE_ROOTS = {"src", "include", "lib", "vendor", "scripts", "android", "docs", ".github"}
 ROOT_FILES = {"platformio.ini", "my.csv", "version.txt", ".gitattributes", ".gitignore"}
 EXCLUDE_DOCS = {"OTA_APP_REVIEW.md", "UI_STALL_DIAGNOSTICS.md", "OTA_NO_TOUCH_TEST.md", "OTA_BLE_RECOVERY_TEST.md"}
 EXCLUDE_DIRS = {".git", ".pio", ".gradle", ".kotlin", "build", "__pycache__", ".venv", "node_modules", "data", "certs", "server"}
@@ -24,6 +24,14 @@ TEXT_EXTENSIONS = {"", ".py", ".sh", ".md", ".txt", ".ini", ".csv", ".properties
 
 def include(rel: Path) -> bool:
     if rel.parts[0] not in SOURCE_ROOTS and rel.as_posix() not in ROOT_FILES:
+        return False
+    name = rel.as_posix()
+    if name.startswith(("android/app/src/test/", "android/app/src/androidTest/")):
+        return False
+    if (name.startswith("scripts/run_") and name.endswith("tests.py")) or name in {
+        "scripts/check_display_contracts.py", ".github/workflows/reliability-tests.yml",
+        "docs/RELIABILITY_1.0.24_RESULTS.json",
+    }:
         return False
     if rel.parts[0] == "docs" and rel.name in EXCLUDE_DOCS:
         return False

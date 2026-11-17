@@ -74,6 +74,4 @@ App 收到固件ACTIVATE的 Idle/Ok/同session/accepted=total 后显示“命令
 首次 USB 部署仅写一个应用槽时，没有旧版本可供恢复；分区迁移和回滚能力应在
 目标硬件上验证后使用，不能仅依赖应用层调用。
 
-主机协议验证：`python scripts/run_device_update_host_tests.py --compiler g++`（或`--zig C:/tools/zig.exe`）编译生产`src/device_update.cpp`及`src/ble_update_service.cpp`，以边界替身验证CRC、offset、session、frame长度、oversize、零session、SHA失败、END前禁止ACTIVATE，以及幂等重试、加密状态读取、同拥有者续传、旧代次数据丢弃、60秒超时和disable清理。Android `:app:testDebugUnitTest` 验证回调隔离和严格状态/偏移恢复。这些不替代实际BLE无线、Flash时延与屏幕测试。
-
 资源sink接口见 `include/device_update.h`；产品通过 `screenAssetUpdateSink()` 提供inactive资源写入/校验/原子切换，禁止直接覆写内置五组fallback。BLE通道不会执行未注册的任意硬件命令，info仅返回支持的功能列表。

@@ -1,8 +1,0 @@
-[
-{"path":"screen","type":"object","x":0,"y":0,"w":480,"h":480,"hidden":false,"font_height":22},
-{"path":"screen/0","type":"label","x":56,"y":12,"w":151,"h":27,"hidden":false,"font_height":27},
-{"path":"screen/1","type":"label","x":56,"y":68,"w":0,"h":15,"hidden":false,"font_height":15},
-{"path":"screen/2","type":"object","x":50,"y":108,"w":408,"h":364,"hidden":false,"font_height":22},
-{"path":"screen/2/0","type":"textarea","x":65,"y":127,"w":384,"h":332,"hidden":false,"font_height":16},
-{"path":"screen/2/0/0","type":"label","x":71,"y":133,"w":372,"h":272,"hidden":false,"font_height":16}
-]

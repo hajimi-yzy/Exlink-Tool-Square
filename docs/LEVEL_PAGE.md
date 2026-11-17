@@ -41,11 +41,7 @@ ROLL 使用 `atan2(ay, az)`，PITCH 使用 `atan2(-ax, sqrt(ay²+az²))`，低�
 
 无效状态隐藏气泡，倾角显示占位符。地址和身份寄存器应答不代表采样数据有效。
 
-## 测试与参考
-
-`python scripts/run_level_tests.py --compiler g++` 测试驱动、滤波、校零、超时、
-短读和错误身份；`tests/level_page_host/run.py` 检查页面状态与对象回收。
-硬件测试应覆盖两轴倾斜、静置校零、反复切页、休眠唤醒及传感器断线。
+## 参考资料
 
 - [TDK MPU-6050 资料](https://invensense.tdk.com/products/motion-tracking/6-axis/mpu-6050/)
 - [Adafruit MPU6050](https://github.com/adafruit/Adafruit_MPU6050)

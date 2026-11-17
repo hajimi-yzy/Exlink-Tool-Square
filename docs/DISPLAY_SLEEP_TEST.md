@@ -23,18 +23,6 @@
 8. 2048 独立实现原生 480px 几何：棋盘 384×384，x=48/y=80，不依赖仅在 ui.c 中生效的缩放宏。
 9. 原五组 EAF 逐像素转换为 ROM RLE，保留原始双眼镜像布局（125×160 单眼 x=70/285、y=170）。296 帧、20fps，资源包 350184 字节；行缓冲250B，加屏幕4行缓冲3840B，无全屏缓存。
 
-## 开发测试
-
-在项目目录执行：
-
-    python -X utf8 scripts/prepare_emote_assets.py --check
-    python -X utf8 scripts/check_display_contracts.py
-    g++ -std=gnu++14 -Wall -Wextra -Werror -fsyntax-only tests/interaction_policy_test.cpp
-    python -m platformio run -e esp32s3
-
-C++ static_assert 执行实际纯输入策略，覆盖左滑/右滑/竖滑、中央按钮、单接触单返回、主页不返回和 millis 溢出。Python 验证 43200 种部分刷新宽高/缓冲组合、棋盘和表情边界。资源脚本校验 EAF 与自定义包的逐像素往返一致性。这些不能代替下面的实机测试。
-
-
 ## 硬件测试
 
 1. 先关闭自动休眠：各页中央按钮正常；最右侧向左滑稳定返回，重复 20 次，不触发页面输出按钮；竖滑设置页不返回。2048 中央左右滑只移动棋盘。
